@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { validateKey, LoginKey } from "@/lib/database";
-import { Shield, Key, AlertCircle, Loader2 } from "lucide-react";
+import { validateKeyWithDevice, LoginKey } from "@/lib/supabaseDatabase";
+import { Shield, Key, AlertCircle, Loader2, Monitor, Smartphone } from "lucide-react";
+import { getDeviceInfo } from "@/lib/deviceFingerprint";
 
 interface LoginFormProps {
   onLogin: (key: LoginKey) => void;
@@ -13,23 +14,29 @@ const LoginForm = ({ onLogin, onAdminClick }: LoginFormProps) => {
   const [key, setKey] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [deviceInfo, setDeviceInfo] = useState<{ count?: number; max?: number } | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setDeviceInfo(null);
     setLoading(true);
 
-    // Simulate loading for security feel
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
-    const validKey = validateKey(key.trim());
-    if (validKey) {
-      onLogin(validKey);
+    const result = await validateKeyWithDevice(key.trim());
+    
+    if (result.success && result.key) {
+      setDeviceInfo({ count: result.deviceCount, max: result.maxDevices });
+      onLogin(result.key);
     } else {
-      setError("Invalid access key. Please try again.");
+      setError(result.error || "Invalid access key. Please try again.");
+      if (result.deviceCount && result.maxDevices) {
+        setDeviceInfo({ count: result.deviceCount, max: result.maxDevices });
+      }
     }
     setLoading(false);
   };
+
+  const currentDevice = getDeviceInfo();
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 grid-pattern">
@@ -66,9 +73,16 @@ const LoginForm = ({ onLogin, onAdminClick }: LoginFormProps) => {
             </div>
 
             {error && (
-              <div className="flex items-center gap-2 text-destructive text-sm bg-destructive/10 border border-destructive/20 rounded-md p-3 animate-fade-in">
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                {error}
+              <div className="flex items-start gap-2 text-destructive text-sm bg-destructive/10 border border-destructive/20 rounded-md p-3 animate-fade-in">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p>{error}</p>
+                  {deviceInfo && (
+                    <p className="text-xs mt-1 text-muted-foreground">
+                      Devices registered: {deviceInfo.count}/{deviceInfo.max}
+                    </p>
+                  )}
+                </div>
               </div>
             )}
 
@@ -92,6 +106,20 @@ const LoginForm = ({ onLogin, onAdminClick }: LoginFormProps) => {
               )}
             </Button>
           </form>
+
+          {/* Device Info */}
+          <div className="mt-4 p-3 bg-secondary/30 rounded-lg border border-border">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              {currentDevice.device === 'Mobile' ? (
+                <Smartphone className="w-3 h-3" />
+              ) : (
+                <Monitor className="w-3 h-3" />
+              )}
+              <span>
+                {currentDevice.browser} on {currentDevice.os}
+              </span>
+            </div>
+          </div>
 
           <div className="mt-6 pt-6 border-t border-border">
             <Button

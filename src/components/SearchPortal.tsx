@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { API_ENDPOINTS, ApiEndpoint, fetchApiData, ApiResponse } from "@/lib/api";
-import { addSearchLog, LoginKey } from "@/lib/database";
+import { addSearchLog, LoginKey } from "@/lib/supabaseDatabase";
 import JsonDisplay from "./JsonDisplay";
 import {
   Search,
@@ -13,7 +13,10 @@ import {
   XCircle,
   Clock,
   User,
+  Monitor,
+  Shield,
 } from "lucide-react";
+import { getDeviceInfo } from "@/lib/deviceFingerprint";
 
 interface SearchPortalProps {
   userKey: LoginKey;
@@ -26,6 +29,8 @@ const SearchPortal = ({ userKey, onLogout }: SearchPortalProps) => {
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<ApiResponse | null>(null);
 
+  const deviceInfo = getDeviceInfo();
+
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchValue.trim()) return;
@@ -33,16 +38,21 @@ const SearchPortal = ({ userKey, onLogout }: SearchPortalProps) => {
     setLoading(true);
     setResponse(null);
 
+    const startTime = Date.now();
     const result = await fetchApiData(selectedEndpoint, searchValue.trim());
+    const responseTime = Date.now() - startTime;
+    
     setResponse(result);
 
-    addSearchLog(
+    // Log to Supabase
+    await addSearchLog(
       userKey.id,
       userKey.name,
       selectedEndpoint.endpoint,
       selectedEndpoint.parameter,
       searchValue.trim(),
-      result.success
+      result.success,
+      responseTime
     );
 
     setLoading(false);
@@ -58,9 +68,15 @@ const SearchPortal = ({ userKey, onLogout }: SearchPortalProps) => {
             <h1 className="text-xl font-bold text-foreground">CFMS Portal</h1>
           </div>
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <User className="w-4 h-4" />
-              <span className="font-mono">{userKey.name}</span>
+            <div className="hidden sm:flex items-center gap-4 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <User className="w-4 h-4" />
+                <span className="font-mono">{userKey.name}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Monitor className="w-4 h-4" />
+                <span className="text-xs">{deviceInfo.browser}</span>
+              </div>
             </div>
             <Button variant="ghost" size="sm" onClick={onLogout}>
               <LogOut className="w-4 h-4 mr-2" />
@@ -71,6 +87,19 @@ const SearchPortal = ({ userKey, onLogout }: SearchPortalProps) => {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-8">
+        {/* Session Info */}
+        <div className="mb-6 p-4 bg-card/50 border border-border rounded-xl flex items-center justify-between animate-fade-in">
+          <div className="flex items-center gap-3">
+            <Shield className="w-5 h-5 text-success" />
+            <div>
+              <p className="text-sm font-medium text-foreground">Secure Session Active</p>
+              <p className="text-xs text-muted-foreground">
+                {deviceInfo.device} • {deviceInfo.os} • {deviceInfo.timezone}
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* Endpoint Selection */}
         <div className="mb-8 animate-fade-in">
           <h2 className="text-sm font-medium text-muted-foreground mb-3">Select Endpoint</h2>

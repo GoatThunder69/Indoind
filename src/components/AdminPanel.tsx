@@ -4,13 +4,24 @@ import { Input } from "@/components/ui/input";
 import {
   getAllKeys,
   getAllLogs,
+  getAllDevices,
   createKey,
   deleteKey,
   generateRandomKey,
-  clearLogs,
+  clearAllLogs,
+  updateKeyStatus,
+  updateKeyMaxDevices,
+  blockDevice,
+  unblockDevice,
+  removeDevice,
+  getDashboardStats,
+  subscribeToKeys,
+  subscribeToDevices,
+  subscribeToLogs,
   LoginKey,
   SearchLog,
-} from "@/lib/database";
+  DeviceLogin,
+} from "@/lib/supabaseDatabase";
 import {
   ShieldCheck,
   LogOut,
@@ -24,57 +35,167 @@ import {
   Check,
   AlertTriangle,
   FileText,
+  Monitor,
+  Smartphone,
+  Tablet,
+  Globe,
+  Ban,
+  CheckCircle,
+  XCircle,
+  Activity,
+  Users,
+  TrendingUp,
+  BarChart3,
+  Eye,
+  EyeOff,
+  Settings,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 interface AdminPanelProps {
   onLogout: () => void;
 }
 
 const AdminPanel = ({ onLogout }: AdminPanelProps) => {
-  const [activeTab, setActiveTab] = useState<"keys" | "logs">("keys");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "keys" | "devices" | "logs">("dashboard");
   const [keys, setKeys] = useState<LoginKey[]>([]);
   const [logs, setLogs] = useState<SearchLog[]>([]);
+  const [devices, setDevices] = useState<DeviceLogin[]>([]);
   const [newKeyName, setNewKeyName] = useState("");
   const [newKeyValue, setNewKeyValue] = useState("");
+  const [newKeyMaxDevices, setNewKeyMaxDevices] = useState("10");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
+    totalKeys: 0,
+    activeKeys: 0,
+    totalDevices: 0,
+    totalSearches: 0,
+    recentActivity: [] as SearchLog[],
+  });
+  const [selectedKeyDevices, setSelectedKeyDevices] = useState<string | null>(null);
 
   useEffect(() => {
     refreshData();
+    
+    // Subscribe to real-time updates
+    const keysSubscription = subscribeToKeys(setKeys);
+    const devicesSubscription = subscribeToDevices(setDevices);
+    const logsSubscription = subscribeToLogs(setLogs);
+
+    return () => {
+      keysSubscription.unsubscribe();
+      devicesSubscription.unsubscribe();
+      logsSubscription.unsubscribe();
+    };
   }, []);
 
-  const refreshData = () => {
-    setKeys(getAllKeys());
-    setLogs(getAllLogs());
+  const refreshData = async () => {
+    setLoading(true);
+    const [keysData, logsData, devicesData, statsData] = await Promise.all([
+      getAllKeys(),
+      getAllLogs(),
+      getAllDevices(),
+      getDashboardStats(),
+    ]);
+    setKeys(keysData);
+    setLogs(logsData);
+    setDevices(devicesData);
+    setStats(statsData);
+    setLoading(false);
   };
 
-  const handleCreateKey = () => {
+  const handleCreateKey = async () => {
     if (!newKeyName.trim()) {
       toast.error("Please enter a key name");
       return;
     }
 
     const keyValue = newKeyValue.trim() || generateRandomKey();
-    createKey(newKeyName.trim(), keyValue);
-    toast.success("Key created successfully");
-    setNewKeyName("");
-    setNewKeyValue("");
-    refreshData();
+    const maxDevices = parseInt(newKeyMaxDevices) || 10;
+    
+    const result = await createKey(newKeyName.trim(), keyValue, maxDevices);
+    if (result) {
+      toast.success("Key created successfully");
+      setNewKeyName("");
+      setNewKeyValue("");
+      setNewKeyMaxDevices("10");
+      refreshData();
+    } else {
+      toast.error("Failed to create key");
+    }
   };
 
-  const handleDeleteKey = (id: string, name: string) => {
-    if (confirm(`Delete key "${name}"? This action cannot be undone.`)) {
-      deleteKey(id);
-      toast.success("Key deleted");
+  const handleDeleteKey = async (id: string, name: string) => {
+    if (confirm(`Delete key "${name}"? This will remove all associated devices and logs.`)) {
+      const success = await deleteKey(id);
+      if (success) {
+        toast.success("Key deleted");
+        refreshData();
+      } else {
+        toast.error("Failed to delete key");
+      }
+    }
+  };
+
+  const handleToggleKeyStatus = async (id: string, currentStatus: boolean) => {
+    const success = await updateKeyStatus(id, !currentStatus);
+    if (success) {
+      toast.success(currentStatus ? "Key deactivated" : "Key activated");
       refreshData();
     }
   };
 
-  const handleClearLogs = () => {
-    if (confirm("Clear all logs? This action cannot be undone.")) {
-      clearLogs();
-      toast.success("Logs cleared");
+  const handleBlockDevice = async (deviceId: string) => {
+    const success = await blockDevice(deviceId);
+    if (success) {
+      toast.success("Device blocked");
       refreshData();
+    }
+  };
+
+  const handleUnblockDevice = async (deviceId: string) => {
+    const success = await unblockDevice(deviceId);
+    if (success) {
+      toast.success("Device unblocked");
+      refreshData();
+    }
+  };
+
+  const handleRemoveDevice = async (deviceId: string) => {
+    if (confirm("Remove this device? The user will need to re-authenticate.")) {
+      const success = await removeDevice(deviceId);
+      if (success) {
+        toast.success("Device removed");
+        refreshData();
+      }
+    }
+  };
+
+  const handleClearLogs = async () => {
+    if (confirm("Clear all logs? This action cannot be undone.")) {
+      const success = await clearAllLogs();
+      if (success) {
+        toast.success("Logs cleared");
+        refreshData();
+      }
     }
   };
 
@@ -89,44 +210,167 @@ const AdminPanel = ({ onLogout }: AdminPanelProps) => {
     setNewKeyValue(generateRandomKey());
   };
 
+  const getDeviceIcon = (deviceType: string) => {
+    switch (deviceType) {
+      case 'Mobile': return <Smartphone className="w-4 h-4" />;
+      case 'Tablet': return <Tablet className="w-4 h-4" />;
+      default: return <Monitor className="w-4 h-4" />;
+    }
+  };
+
+  const getDevicesForKey = (keyId: string) => {
+    return devices.filter(d => d.key_id === keyId);
+  };
+
   return (
     <div className="min-h-screen bg-background grid-pattern">
       {/* Header */}
       <header className="border-b border-warning/20 bg-card/80 backdrop-blur-sm sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <ShieldCheck className="w-6 h-6 text-warning" />
-            <h1 className="text-xl font-bold text-foreground">Admin Panel</h1>
+            <h1 className="text-xl font-bold text-foreground">Admin Control Center</h1>
           </div>
-          <Button variant="ghost" size="sm" onClick={onLogout}>
-            <LogOut className="w-4 h-4 mr-2" />
-            Logout
-          </Button>
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="sm" onClick={refreshData} disabled={loading}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+            <Button variant="ghost" size="sm" onClick={onLogout}>
+              <LogOut className="w-4 h-4 mr-2" />
+              Logout
+            </Button>
+          </div>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-8">
+      <main className="max-w-7xl mx-auto px-4 py-8">
         {/* Tabs */}
-        <div className="flex gap-2 mb-6">
-          <Button
-            variant={activeTab === "keys" ? "default" : "outline"}
-            onClick={() => setActiveTab("keys")}
-            className={activeTab === "keys" ? "bg-warning text-warning-foreground hover:bg-warning/90" : ""}
-          >
-            <Key className="w-4 h-4 mr-2" />
-            Access Keys
-          </Button>
-          <Button
-            variant={activeTab === "logs" ? "default" : "outline"}
-            onClick={() => setActiveTab("logs")}
-            className={activeTab === "logs" ? "bg-warning text-warning-foreground hover:bg-warning/90" : ""}
-          >
-            <FileText className="w-4 h-4 mr-2" />
-            Search Logs
-          </Button>
+        <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
+          {[
+            { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
+            { id: 'keys', icon: Key, label: 'Access Keys' },
+            { id: 'devices', icon: Monitor, label: 'Devices' },
+            { id: 'logs', icon: FileText, label: 'Search Logs' },
+          ].map((tab) => (
+            <Button
+              key={tab.id}
+              variant={activeTab === tab.id ? "default" : "outline"}
+              onClick={() => setActiveTab(tab.id as typeof activeTab)}
+              className={activeTab === tab.id ? "bg-warning text-warning-foreground hover:bg-warning/90" : ""}
+            >
+              <tab.icon className="w-4 h-4 mr-2" />
+              {tab.label}
+            </Button>
+          ))}
         </div>
 
-        {activeTab === "keys" ? (
+        {/* Dashboard Tab */}
+        {activeTab === "dashboard" && (
+          <div className="space-y-6 animate-fade-in">
+            {/* Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-card border border-border rounded-xl p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-muted-foreground text-sm">Total Keys</p>
+                    <p className="text-3xl font-bold text-foreground">{stats.totalKeys}</p>
+                  </div>
+                  <Key className="w-10 h-10 text-primary/30" />
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  {stats.activeKeys} active
+                </p>
+              </div>
+              <div className="bg-card border border-border rounded-xl p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-muted-foreground text-sm">Active Devices</p>
+                    <p className="text-3xl font-bold text-foreground">{stats.totalDevices}</p>
+                  </div>
+                  <Users className="w-10 h-10 text-success/30" />
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Connected users
+                </p>
+              </div>
+              <div className="bg-card border border-border rounded-xl p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-muted-foreground text-sm">Total Searches</p>
+                    <p className="text-3xl font-bold text-foreground">{stats.totalSearches}</p>
+                  </div>
+                  <Search className="w-10 h-10 text-warning/30" />
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  API requests made
+                </p>
+              </div>
+              <div className="bg-card border border-border rounded-xl p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-muted-foreground text-sm">Success Rate</p>
+                    <p className="text-3xl font-bold text-foreground">
+                      {stats.totalSearches > 0 
+                        ? Math.round((logs.filter(l => l.success).length / logs.length) * 100)
+                        : 0}%
+                    </p>
+                  </div>
+                  <TrendingUp className="w-10 h-10 text-primary/30" />
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Successful queries
+                </p>
+              </div>
+            </div>
+
+            {/* Recent Activity */}
+            <div className="bg-card border border-border rounded-xl p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Activity className="w-5 h-5 text-warning" />
+                <h2 className="text-lg font-semibold text-foreground">Recent Activity</h2>
+              </div>
+              {stats.recentActivity.length === 0 ? (
+                <p className="text-muted-foreground text-center py-8">No recent activity</p>
+              ) : (
+                <div className="space-y-2">
+                  {stats.recentActivity.map((log) => (
+                    <div
+                      key={log.id}
+                      className={`flex items-center justify-between p-3 rounded-lg border ${
+                        log.success
+                          ? "bg-success/5 border-success/20"
+                          : "bg-destructive/5 border-destructive/20"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        {log.success ? (
+                          <CheckCircle className="w-4 h-4 text-success" />
+                        ) : (
+                          <XCircle className="w-4 h-4 text-destructive" />
+                        )}
+                        <div>
+                          <span className="font-mono text-sm text-foreground">
+                            {log.endpoint}
+                          </span>
+                          <span className="text-muted-foreground text-sm ml-2">
+                            by {log.key_name}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(log.timestamp).toLocaleTimeString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Keys Tab */}
+        {activeTab === "keys" && (
           <div className="space-y-6 animate-fade-in">
             {/* Create Key */}
             <div className="bg-card border border-border rounded-xl p-6">
@@ -134,7 +378,7 @@ const AdminPanel = ({ onLogout }: AdminPanelProps) => {
                 <Plus className="w-5 h-5 text-warning" />
                 Create New Key
               </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                 <div>
                   <label className="text-sm text-muted-foreground mb-2 block">Key Name</label>
                   <Input
@@ -157,6 +401,17 @@ const AdminPanel = ({ onLogout }: AdminPanelProps) => {
                     </Button>
                   </div>
                 </div>
+                <div>
+                  <label className="text-sm text-muted-foreground mb-2 block">Max Devices</label>
+                  <Input
+                    type="number"
+                    placeholder="10"
+                    value={newKeyMaxDevices}
+                    onChange={(e) => setNewKeyMaxDevices(e.target.value)}
+                    min="1"
+                    max="100"
+                  />
+                </div>
               </div>
               <Button onClick={handleCreateKey} className="bg-warning text-warning-foreground hover:bg-warning/90">
                 <Plus className="w-4 h-4 mr-2" />
@@ -164,128 +419,341 @@ const AdminPanel = ({ onLogout }: AdminPanelProps) => {
               </Button>
             </div>
 
-            {/* Keys List */}
+            {/* Keys Table */}
             <div className="bg-card border border-border rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
                   <Key className="w-5 h-5 text-warning" />
-                  Active Keys ({keys.length})
+                  Access Keys ({keys.length})
                 </h2>
-                <Button variant="ghost" size="sm" onClick={refreshData}>
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  Refresh
-                </Button>
               </div>
 
               {keys.length === 0 ? (
                 <p className="text-muted-foreground text-center py-8">No keys created yet</p>
               ) : (
-                <div className="space-y-3">
-                  {keys.map((key) => (
-                    <div
-                      key={key.id}
-                      className="flex items-center justify-between p-4 bg-secondary/50 rounded-lg border border-border"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-foreground">{key.name}</div>
-                        <div className="font-mono text-sm text-primary truncate">{key.key}</div>
-                        <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            Created: {new Date(key.createdAt).toLocaleDateString()}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <Search className="w-3 h-3" />
-                            Uses: {key.usageCount}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 ml-4">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => copyToClipboard(key.key, key.id)}
-                        >
-                          {copiedId === key.id ? (
-                            <Check className="w-4 h-4 text-success" />
-                          ) : (
-                            <Copy className="w-4 h-4" />
-                          )}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-destructive hover:text-destructive"
-                          onClick={() => handleDeleteKey(key.id, key.name)}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Key</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Devices</TableHead>
+                        <TableHead>Uses</TableHead>
+                        <TableHead>Created</TableHead>
+                        <TableHead>Last Used</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {keys.map((key) => {
+                        const keyDevices = getDevicesForKey(key.id);
+                        const activeDevices = keyDevices.filter(d => !d.is_blocked).length;
+                        return (
+                          <TableRow key={key.id}>
+                            <TableCell className="font-medium">{key.name}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <code className="text-xs bg-secondary px-2 py-1 rounded">
+                                  {key.key}
+                                </code>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
+                                  onClick={() => copyToClipboard(key.key, key.id)}
+                                >
+                                  {copiedId === key.id ? (
+                                    <Check className="w-3 h-3 text-success" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
+                                </Button>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={key.is_active ? "default" : "secondary"}>
+                                {key.is_active ? "Active" : "Inactive"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Dialog>
+                                <DialogTrigger asChild>
+                                  <Button variant="ghost" size="sm" className="h-auto p-1">
+                                    <span className={`${activeDevices >= key.max_devices ? 'text-destructive' : 'text-foreground'}`}>
+                                      {activeDevices}/{key.max_devices}
+                                    </span>
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent className="max-w-2xl">
+                                  <DialogHeader>
+                                    <DialogTitle>Devices for {key.name}</DialogTitle>
+                                    <DialogDescription>
+                                      {activeDevices} of {key.max_devices} device slots used
+                                    </DialogDescription>
+                                  </DialogHeader>
+                                  <div className="max-h-[400px] overflow-y-auto">
+                                    {keyDevices.length === 0 ? (
+                                      <p className="text-muted-foreground text-center py-4">No devices registered</p>
+                                    ) : (
+                                      <div className="space-y-2">
+                                        {keyDevices.map((device) => (
+                                          <div
+                                            key={device.id}
+                                            className={`p-3 rounded-lg border ${device.is_blocked ? 'border-destructive/30 bg-destructive/5' : 'border-border bg-secondary/30'}`}
+                                          >
+                                            <div className="flex items-center justify-between">
+                                              <div className="flex items-center gap-3">
+                                                {getDeviceIcon(device.device_type)}
+                                                <div>
+                                                  <div className="font-medium text-sm">
+                                                    {device.browser} on {device.os}
+                                                  </div>
+                                                  <div className="text-xs text-muted-foreground flex items-center gap-2">
+                                                    <Globe className="w-3 h-3" />
+                                                    {device.location || 'Unknown location'}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                              <div className="flex items-center gap-2">
+                                                {device.is_blocked ? (
+                                                  <Button size="sm" variant="outline" onClick={() => handleUnblockDevice(device.id)}>
+                                                    Unblock
+                                                  </Button>
+                                                ) : (
+                                                  <Button size="sm" variant="ghost" className="text-destructive" onClick={() => handleBlockDevice(device.id)}>
+                                                    <Ban className="w-4 h-4" />
+                                                  </Button>
+                                                )}
+                                                <Button size="sm" variant="ghost" onClick={() => handleRemoveDevice(device.id)}>
+                                                  <Trash2 className="w-4 h-4" />
+                                                </Button>
+                                              </div>
+                                            </div>
+                                            <div className="mt-2 text-xs text-muted-foreground grid grid-cols-2 gap-2">
+                                              <span>First login: {new Date(device.first_login).toLocaleString()}</span>
+                                              <span>Last login: {new Date(device.last_login).toLocaleString()}</span>
+                                              <span>Login count: {device.login_count}</span>
+                                              <span>IP: {device.ip_address || 'Unknown'}</span>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </DialogContent>
+                              </Dialog>
+                            </TableCell>
+                            <TableCell>{key.usage_count}</TableCell>
+                            <TableCell className="text-muted-foreground text-sm">
+                              {new Date(key.created_at).toLocaleDateString()}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground text-sm">
+                              {key.last_used ? new Date(key.last_used).toLocaleString() : 'Never'}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleToggleKeyStatus(key.id, key.is_active)}
+                                  title={key.is_active ? "Deactivate" : "Activate"}
+                                >
+                                  {key.is_active ? (
+                                    <EyeOff className="w-4 h-4" />
+                                  ) : (
+                                    <Eye className="w-4 h-4" />
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="text-destructive hover:text-destructive"
+                                  onClick={() => handleDeleteKey(key.id, key.name)}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
                 </div>
               )}
             </div>
           </div>
-        ) : (
+        )}
+
+        {/* Devices Tab */}
+        {activeTab === "devices" && (
+          <div className="bg-card border border-border rounded-xl p-6 animate-fade-in">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                <Monitor className="w-5 h-5 text-warning" />
+                All Devices ({devices.length})
+              </h2>
+            </div>
+
+            {devices.length === 0 ? (
+              <p className="text-muted-foreground text-center py-8">No devices registered yet</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Device</TableHead>
+                      <TableHead>Key</TableHead>
+                      <TableHead>Location</TableHead>
+                      <TableHead>IP Address</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Logins</TableHead>
+                      <TableHead>Last Active</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {devices.map((device) => {
+                      const key = keys.find(k => k.id === device.key_id);
+                      return (
+                        <TableRow key={device.id}>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              {getDeviceIcon(device.device_type)}
+                              <div>
+                                <div className="font-medium text-sm">{device.browser}</div>
+                                <div className="text-xs text-muted-foreground">{device.os} • {device.screen_resolution}</div>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{key?.name || 'Unknown'}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1 text-sm">
+                              <Globe className="w-3 h-3" />
+                              {device.location || 'Unknown'}
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {device.ip_address || 'Unknown'}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={device.is_blocked ? "destructive" : "default"}>
+                              {device.is_blocked ? "Blocked" : "Active"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>{device.login_count}</TableCell>
+                          <TableCell className="text-muted-foreground text-sm">
+                            {new Date(device.last_login).toLocaleString()}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              {device.is_blocked ? (
+                                <Button size="sm" variant="outline" onClick={() => handleUnblockDevice(device.id)}>
+                                  Unblock
+                                </Button>
+                              ) : (
+                                <Button size="sm" variant="ghost" className="text-warning" onClick={() => handleBlockDevice(device.id)}>
+                                  <Ban className="w-4 h-4" />
+                                </Button>
+                              )}
+                              <Button size="sm" variant="ghost" className="text-destructive" onClick={() => handleRemoveDevice(device.id)}>
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Logs Tab */}
+        {activeTab === "logs" && (
           <div className="bg-card border border-border rounded-xl p-6 animate-fade-in">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
                 <FileText className="w-5 h-5 text-warning" />
                 Search Logs ({logs.length})
               </h2>
-              <div className="flex gap-2">
-                <Button variant="ghost" size="sm" onClick={refreshData}>
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  Refresh
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-destructive hover:text-destructive"
-                  onClick={handleClearLogs}
-                  disabled={logs.length === 0}
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Clear
-                </Button>
-              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                onClick={handleClearLogs}
+                disabled={logs.length === 0}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Clear All
+              </Button>
             </div>
 
             {logs.length === 0 ? (
               <p className="text-muted-foreground text-center py-8">No search logs yet</p>
             ) : (
-              <div className="space-y-2 max-h-[600px] overflow-auto">
-                {logs.map((log) => (
-                  <div
-                    key={log.id}
-                    className={`flex items-start justify-between p-3 rounded-lg border ${
-                      log.success
-                        ? "bg-success/5 border-success/20"
-                        : "bg-destructive/5 border-destructive/20"
-                    }`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        {log.success ? (
-                          <Check className="w-4 h-4 text-success flex-shrink-0" />
-                        ) : (
-                          <AlertTriangle className="w-4 h-4 text-destructive flex-shrink-0" />
-                        )}
-                        <span className="font-mono text-sm text-foreground">
-                          {log.endpoint}?{log.parameter}={log.value}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                        <span>Key: {log.keyName}</span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {new Date(log.timestamp).toLocaleString()}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Endpoint</TableHead>
+                      <TableHead>Query</TableHead>
+                      <TableHead>Key</TableHead>
+                      <TableHead>Device</TableHead>
+                      <TableHead>Time</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {logs.map((log) => {
+                      const device = devices.find(d => d.device_id === log.device_id);
+                      return (
+                        <TableRow key={log.id}>
+                          <TableCell>
+                            {log.success ? (
+                              <Badge variant="default" className="bg-success/20 text-success border-success/30">
+                                <CheckCircle className="w-3 h-3 mr-1" />
+                                Success
+                              </Badge>
+                            ) : (
+                              <Badge variant="destructive">
+                                <XCircle className="w-3 h-3 mr-1" />
+                                Failed
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="font-mono text-sm">{log.endpoint}</TableCell>
+                          <TableCell>
+                            <code className="text-xs bg-secondary px-2 py-1 rounded">
+                              {log.parameter}={log.value}
+                            </code>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{log.key_name}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            {device ? (
+                              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                                {getDeviceIcon(device.device_type)}
+                                {device.browser}
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">Unknown</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-sm">
+                            {new Date(log.timestamp).toLocaleString()}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
               </div>
             )}
           </div>

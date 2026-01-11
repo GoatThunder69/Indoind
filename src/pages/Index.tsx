@@ -3,7 +3,7 @@ import LoginForm from "@/components/LoginForm";
 import AdminLogin from "@/components/AdminLogin";
 import SearchPortal from "@/components/SearchPortal";
 import AdminPanel from "@/components/AdminPanel";
-import { LoginKey } from "@/lib/database";
+import { LoginKey } from "@/lib/supabaseDatabase";
 
 type ViewState = "login" | "admin-login" | "portal" | "admin-panel";
 
