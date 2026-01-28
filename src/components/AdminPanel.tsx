@@ -49,8 +49,10 @@ import {
   Eye,
   EyeOff,
   Settings,
+  Lock,
 } from "lucide-react";
 import { toast } from "sonner";
+import AdminPasswordChange from "./AdminPasswordChange";
 import {
   Table,
   TableBody,
@@ -91,6 +93,7 @@ const AdminPanel = ({ onLogout }: AdminPanelProps) => {
     recentActivity: [] as SearchLog[],
   });
   const [selectedKeyDevices, setSelectedKeyDevices] = useState<string | null>(null);
+  const [showPasswordChange, setShowPasswordChange] = useState(false);
 
   useEffect(() => {
     refreshData();
@@ -235,6 +238,10 @@ const AdminPanel = ({ onLogout }: AdminPanelProps) => {
             <Button variant="ghost" size="sm" onClick={refreshData} disabled={loading}>
               <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
               Refresh
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setShowPasswordChange(true)}>
+              <Lock className="w-4 h-4 mr-2" />
+              Change Password
             </Button>
             <Button variant="ghost" size="sm" onClick={onLogout}>
               <LogOut className="w-4 h-4 mr-2" />
@@ -759,6 +766,11 @@ const AdminPanel = ({ onLogout }: AdminPanelProps) => {
           </div>
         )}
       </main>
+
+      {/* Password Change Modal */}
+      {showPasswordChange && (
+        <AdminPasswordChange onClose={() => setShowPasswordChange(false)} />
+      )}
     </div>
   );
 };

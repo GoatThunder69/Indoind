@@ -1,31 +1,39 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ShieldCheck, Lock, AlertCircle, Loader2, ArrowLeft } from "lucide-react";
+import { validateAdminPassword, initializeAdminSettings } from "@/lib/adminAuth";
 
 interface AdminLoginProps {
   onLogin: () => void;
   onBack: () => void;
 }
 
-const ADMIN_PASSWORD = "Cfms@7890";
-
 const AdminLogin = ({ onLogin, onBack }: AdminLoginProps) => {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    // Initialize admin settings on mount
+    initializeAdminSettings();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    if (password === ADMIN_PASSWORD) {
-      onLogin();
-    } else {
-      setError("Invalid admin password.");
+    try {
+      const isValid = await validateAdminPassword(password);
+      
+      if (isValid) {
+        onLogin();
+      } else {
+        setError("Invalid admin password.");
+      }
+    } catch (err) {
+      setError("Failed to validate password. Please try again.");
     }
     setLoading(false);
   };
