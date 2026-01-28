@@ -36,17 +36,24 @@ export const initializeAdminSettings = async (): Promise<void> => {
 
 // Validate admin password
 export const validateAdminPassword = async (password: string): Promise<boolean> => {
-  const { data, error } = await supabase
-    .from('admin_settings')
-    .select('password_hash')
-    .single();
+  try {
+    const { data, error } = await supabase
+      .from('admin_settings')
+      .select('password_hash')
+      .single();
 
-  if (error || !data) {
-    // Fallback to default if table doesn't exist yet
+    if (error || !data) {
+      // Fallback to default if table doesn't exist yet
+      console.log('Using default password (table not found)');
+      return password === 'Cfms@7890';
+    }
+
+    return data.password_hash === hashPassword(password);
+  } catch (err) {
+    // If any error, fallback to default password
+    console.log('Using default password (error occurred)');
     return password === 'Cfms@7890';
   }
-
-  return data.password_hash === hashPassword(password);
 };
 
 // Change admin password
