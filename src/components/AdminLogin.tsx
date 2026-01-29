@@ -25,6 +25,8 @@ const AdminLogin = ({ onLogin, onBack }: AdminLoginProps) => {
     setLoading(true);
 
     try {
+      // Ensure default settings exist before validating (first-run UX).
+      await initializeAdminSettings();
       const isValid = await validateAdminPassword(password);
       
       if (isValid) {
