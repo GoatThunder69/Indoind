@@ -23,23 +23,27 @@ const AdminPasswordChange = ({ onClose }: AdminPasswordChangeProps) => {
     e.preventDefault();
     setError("");
 
+    const current = currentPassword.trim();
+    const next = newPassword.trim();
+    const confirm = confirmPassword.trim();
+
     // Validation
-    if (!currentPassword || !newPassword || !confirmPassword) {
+    if (!current || !next || !confirm) {
       setError("All fields are required");
       return;
     }
 
-    if (newPassword !== confirmPassword) {
+    if (next !== confirm) {
       setError("New passwords do not match");
       return;
     }
 
-    if (newPassword.length < 6) {
+    if (next.length < 6) {
       setError("New password must be at least 6 characters");
       return;
     }
 
-    if (currentPassword === newPassword) {
+    if (current === next) {
       setError("New password must be different from current password");
       return;
     }
@@ -47,7 +51,7 @@ const AdminPasswordChange = ({ onClose }: AdminPasswordChangeProps) => {
     setLoading(true);
 
     try {
-      const result = await changeAdminPassword(currentPassword, newPassword);
+      const result = await changeAdminPassword(current, next);
       
       if (result.success) {
         toast.success("Password changed successfully!");
