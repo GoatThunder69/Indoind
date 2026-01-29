@@ -19,23 +19,19 @@ const AdminLogin = ({ onLogin, onBack }: AdminLoginProps) => {
     initializeAdminSettings();
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
 
-    try {
-      // Ensure default settings exist before validating (first-run UX).
-      await initializeAdminSettings();
-      const isValid = await validateAdminPassword(password.trim());
-      
-      if (isValid) {
-        onLogin();
-      } else {
-        setError("Invalid admin password.");
-      }
-    } catch (err) {
-      setError("Failed to validate password. Please try again.");
+    // Initialize settings if needed and validate
+    initializeAdminSettings();
+    const isValid = validateAdminPassword(password.trim());
+    
+    if (isValid) {
+      onLogin();
+    } else {
+      setError("Invalid admin password.");
     }
     setLoading(false);
   };
