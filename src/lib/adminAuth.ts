@@ -20,27 +20,42 @@ const hashPassword = (password: string): string => {
 
 // Initialize admin settings if not exists
 export const initializeAdminSettings = async (): Promise<void> => {
-  const { data } = await supabase
-    .from('admin_settings')
-    .select('id')
-    .single();
+  try {
+    // Use maybeSingle so we don't error when the table is empty.
+    const { data, error } = await supabase
+      .from('admin_settings')
+      .select('id')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-  if (!data) {
-    // Create default admin password
-    const defaultPassword = 'Cfms@7890';
-    await supabase.from('admin_settings').insert({
-      password_hash: hashPassword(defaultPassword),
-    });
+    // If the table is missing (or any other error), just skip initialization.
+    // validateAdminPassword() already has a safe fallback.
+    if (error) return;
+
+    if (!data) {
+      // Create default admin password
+      const defaultPassword = 'Cfms@7890';
+      await supabase.from('admin_settings').insert({
+        password_hash: hashPassword(defaultPassword),
+        updated_at: new Date().toISOString(),
+      });
+    }
+  } catch {
+    // Ignore initialization failures; login can still fallback to default.
   }
 };
 
 // Validate admin password
 export const validateAdminPassword = async (password: string): Promise<boolean> => {
   try {
+    // Be resilient to 0 rows / multiple rows by always selecting the latest record.
     const { data, error } = await supabase
       .from('admin_settings')
       .select('password_hash')
-      .single();
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (error || !data) {
       // Fallback to default if table doesn't exist yet
