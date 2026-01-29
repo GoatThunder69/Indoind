@@ -50,13 +50,17 @@ const AdminPasswordChange = ({ onClose }: AdminPasswordChangeProps) => {
 
     setLoading(true);
 
-    const result = changeAdminPassword(current, next);
-    
-    if (result.success) {
-      toast.success("Password changed successfully!");
-      onClose();
-    } else {
-      setError(result.error || "Failed to change password");
+    try {
+      const result = await changeAdminPassword(current, next);
+      
+      if (result.success) {
+        toast.success("Password changed successfully!");
+        onClose();
+      } else {
+        setError(result.error || "Failed to change password");
+      }
+    } catch (err) {
+      setError("Failed to change password. Please try again.");
     }
     
     setLoading(false);
