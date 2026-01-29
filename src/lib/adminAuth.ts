@@ -1,12 +1,7 @@
-// Admin authentication with localStorage (simple, reliable)
+// Admin authentication with Supabase (syncs across devices)
+import { supabase } from '@/integrations/supabase/client';
 
-const STORAGE_KEY = 'cfms_admin_settings';
 const DEFAULT_PASSWORD = 'Cfms@7890';
-
-interface AdminSettings {
-  passwordHash: string;
-  updatedAt: string;
-}
 
 // Simple hash function
 const hashPassword = (password: string): string => {
@@ -19,55 +14,67 @@ const hashPassword = (password: string): string => {
   return 'hash_' + Math.abs(hash).toString(16) + '_' + password.length;
 };
 
-// Get stored settings
-const getSettings = (): AdminSettings | null => {
+// Initialize admin settings (creates row if not exists)
+export const initializeAdminSettings = async (): Promise<void> => {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      return JSON.parse(stored);
+    const { data, error } = await supabase
+      .from('admin_settings')
+      .select('id')
+      .limit(1);
+
+    if (error) {
+      console.log('Admin settings table check failed:', error.message);
+      return;
     }
-  } catch {
-    // Ignore parse errors
-  }
-  return null;
-};
 
-// Save settings
-const saveSettings = (settings: AdminSettings): void => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-};
-
-// Initialize admin settings if not exists
-export const initializeAdminSettings = (): void => {
-  const settings = getSettings();
-  if (!settings) {
-    saveSettings({
-      passwordHash: hashPassword(DEFAULT_PASSWORD),
-      updatedAt: new Date().toISOString(),
-    });
+    // If no rows exist, create default
+    if (!data || data.length === 0) {
+      await supabase.from('admin_settings').insert({
+        password_hash: hashPassword(DEFAULT_PASSWORD),
+        updated_at: new Date().toISOString(),
+      });
+    }
+  } catch (e) {
+    console.log('Init admin settings error:', e);
   }
 };
 
 // Validate admin password
-export const validateAdminPassword = (password: string): boolean => {
-  const settings = getSettings();
-  
-  if (!settings) {
-    // First run - initialize and check against default
-    initializeAdminSettings();
+export const validateAdminPassword = async (password: string): Promise<boolean> => {
+  try {
+    const { data, error } = await supabase
+      .from('admin_settings')
+      .select('password_hash')
+      .order('updated_at', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.log('Validate error:', error.message);
+      // Fallback to default password if table doesn't exist
+      return password === DEFAULT_PASSWORD;
+    }
+
+    // No rows - use default
+    if (!data || data.length === 0) {
+      return password === DEFAULT_PASSWORD;
+    }
+
+    const row = data[0];
+    return row.password_hash === hashPassword(password);
+  } catch (e) {
+    console.log('Validate exception:', e);
     return password === DEFAULT_PASSWORD;
   }
-  
-  return settings.passwordHash === hashPassword(password);
 };
 
 // Change admin password
-export const changeAdminPassword = (
+export const changeAdminPassword = async (
   currentPassword: string,
   newPassword: string
-): { success: boolean; error?: string } => {
+): Promise<{ success: boolean; error?: string }> => {
   // Validate current password first
-  if (!validateAdminPassword(currentPassword)) {
+  const isValid = await validateAdminPassword(currentPassword);
+  if (!isValid) {
     return { success: false, error: 'Current password is incorrect' };
   }
 
@@ -76,19 +83,39 @@ export const changeAdminPassword = (
     return { success: false, error: 'New password must be at least 6 characters' };
   }
 
-  // Update password
-  saveSettings({
-    passwordHash: hashPassword(newPassword),
-    updatedAt: new Date().toISOString(),
-  });
+  try {
+    // Delete all existing rows and insert new one (ensures single row)
+    await supabase.from('admin_settings').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    
+    const { error } = await supabase.from('admin_settings').insert({
+      password_hash: hashPassword(newPassword),
+      updated_at: new Date().toISOString(),
+    });
 
-  return { success: true };
+    if (error) {
+      console.log('Change password error:', error.message);
+      return { success: false, error: 'Failed to update password' };
+    }
+
+    return { success: true };
+  } catch (e) {
+    console.log('Change password exception:', e);
+    return { success: false, error: 'Failed to update password' };
+  }
 };
 
-// Reset to default password (for recovery)
-export const resetAdminPassword = (): void => {
-  saveSettings({
-    passwordHash: hashPassword(DEFAULT_PASSWORD),
-    updatedAt: new Date().toISOString(),
-  });
+// Reset to default password
+export const resetAdminPassword = async (): Promise<boolean> => {
+  try {
+    await supabase.from('admin_settings').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    
+    const { error } = await supabase.from('admin_settings').insert({
+      password_hash: hashPassword(DEFAULT_PASSWORD),
+      updated_at: new Date().toISOString(),
+    });
+
+    return !error;
+  } catch (e) {
+    return false;
+  }
 };
