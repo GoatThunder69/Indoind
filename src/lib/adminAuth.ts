@@ -1,13 +1,14 @@
-// Admin authentication with Supabase
-import { supabase } from '@/integrations/supabase/client';
+// Admin authentication with localStorage (simple, reliable)
 
-export interface AdminSettings {
-  id: string;
-  password_hash: string;
-  updated_at: string;
+const STORAGE_KEY = 'cfms_admin_settings';
+const DEFAULT_PASSWORD = 'Cfms@7890';
+
+interface AdminSettings {
+  passwordHash: string;
+  updatedAt: string;
 }
 
-// Simple hash function (for demo - in production use bcrypt via edge function)
+// Simple hash function
 const hashPassword = (password: string): string => {
   let hash = 0;
   for (let i = 0; i < password.length; i++) {
@@ -18,73 +19,55 @@ const hashPassword = (password: string): string => {
   return 'hash_' + Math.abs(hash).toString(16) + '_' + password.length;
 };
 
-// Initialize admin settings if not exists
-export const initializeAdminSettings = async (): Promise<void> => {
+// Get stored settings
+const getSettings = (): AdminSettings | null => {
   try {
-    // Use maybeSingle so we don't error when the table is empty.
-    const { data, error } = await supabase
-      .from('admin_settings')
-      .select('id')
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    // Some PostgREST setups still return an array when using limit(1).
-    const row = Array.isArray(data) ? data[0] : data;
-
-    // If the table is missing (or any other error), just skip initialization.
-    // validateAdminPassword() already has a safe fallback.
-    if (error) return;
-
-    if (!row) {
-      // Create default admin password
-      const defaultPassword = 'Cfms@7890';
-      await supabase.from('admin_settings').insert({
-        password_hash: hashPassword(defaultPassword),
-        updated_at: new Date().toISOString(),
-      });
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      return JSON.parse(stored);
     }
   } catch {
-    // Ignore initialization failures; login can still fallback to default.
+    // Ignore parse errors
+  }
+  return null;
+};
+
+// Save settings
+const saveSettings = (settings: AdminSettings): void => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+};
+
+// Initialize admin settings if not exists
+export const initializeAdminSettings = (): void => {
+  const settings = getSettings();
+  if (!settings) {
+    saveSettings({
+      passwordHash: hashPassword(DEFAULT_PASSWORD),
+      updatedAt: new Date().toISOString(),
+    });
   }
 };
 
 // Validate admin password
-export const validateAdminPassword = async (password: string): Promise<boolean> => {
-  try {
-    // Be resilient to 0 rows / multiple rows by always selecting the latest record.
-    const { data, error } = await supabase
-      .from('admin_settings')
-      .select('password_hash')
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    // Some PostgREST setups still return an array when using limit(1).
-    const row = Array.isArray(data) ? data[0] : data;
-
-    if (error || !row) {
-      // Fallback to default if table doesn't exist yet
-      console.log('Using default password (table not found)');
-      return password === 'Cfms@7890';
-    }
-
-    return row.password_hash === hashPassword(password);
-  } catch (err) {
-    // If any error, fallback to default password
-    console.log('Using default password (error occurred)');
-    return password === 'Cfms@7890';
+export const validateAdminPassword = (password: string): boolean => {
+  const settings = getSettings();
+  
+  if (!settings) {
+    // First run - initialize and check against default
+    initializeAdminSettings();
+    return password === DEFAULT_PASSWORD;
   }
+  
+  return settings.passwordHash === hashPassword(password);
 };
 
 // Change admin password
-export const changeAdminPassword = async (
+export const changeAdminPassword = (
   currentPassword: string,
   newPassword: string
-): Promise<{ success: boolean; error?: string }> => {
+): { success: boolean; error?: string } => {
   // Validate current password first
-  const isValid = await validateAdminPassword(currentPassword);
-  if (!isValid) {
+  if (!validateAdminPassword(currentPassword)) {
     return { success: false, error: 'Current password is incorrect' };
   }
 
@@ -94,17 +77,18 @@ export const changeAdminPassword = async (
   }
 
   // Update password
-  const { error } = await supabase
-    .from('admin_settings')
-    .update({
-      password_hash: hashPassword(newPassword),
-      updated_at: new Date().toISOString(),
-    })
-    .neq('id', '00000000-0000-0000-0000-000000000000'); // Update all rows
-
-  if (error) {
-    return { success: false, error: 'Failed to update password' };
-  }
+  saveSettings({
+    passwordHash: hashPassword(newPassword),
+    updatedAt: new Date().toISOString(),
+  });
 
   return { success: true };
+};
+
+// Reset to default password (for recovery)
+export const resetAdminPassword = (): void => {
+  saveSettings({
+    passwordHash: hashPassword(DEFAULT_PASSWORD),
+    updatedAt: new Date().toISOString(),
+  });
 };
