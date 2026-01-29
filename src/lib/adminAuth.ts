@@ -29,11 +29,14 @@ export const initializeAdminSettings = async (): Promise<void> => {
       .limit(1)
       .maybeSingle();
 
+    // Some PostgREST setups still return an array when using limit(1).
+    const row = Array.isArray(data) ? data[0] : data;
+
     // If the table is missing (or any other error), just skip initialization.
     // validateAdminPassword() already has a safe fallback.
     if (error) return;
 
-    if (!data) {
+    if (!row) {
       // Create default admin password
       const defaultPassword = 'Cfms@7890';
       await supabase.from('admin_settings').insert({
@@ -57,13 +60,16 @@ export const validateAdminPassword = async (password: string): Promise<boolean> 
       .limit(1)
       .maybeSingle();
 
-    if (error || !data) {
+    // Some PostgREST setups still return an array when using limit(1).
+    const row = Array.isArray(data) ? data[0] : data;
+
+    if (error || !row) {
       // Fallback to default if table doesn't exist yet
       console.log('Using default password (table not found)');
       return password === 'Cfms@7890';
     }
 
-    return data.password_hash === hashPassword(password);
+    return row.password_hash === hashPassword(password);
   } catch (err) {
     // If any error, fallback to default password
     console.log('Using default password (error occurred)');
