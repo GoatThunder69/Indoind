@@ -19,23 +19,29 @@ export const initializeAdminSettings = async (): Promise<void> => {
   try {
     const { data, error } = await supabase
       .from('admin_settings')
-      .select('id')
-      .limit(1);
+      .select('password_hash, updated_at')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (error) {
-      console.log('Admin settings table check failed:', error.message);
+      console.log('[adminAuth] init: table check failed:', error.message);
       return;
     }
 
     // If no rows exist, create default
-    if (!data || data.length === 0) {
-      await supabase.from('admin_settings').insert({
+    if (!data) {
+      const { error: insertError } = await supabase.from('admin_settings').insert({
         password_hash: hashPassword(DEFAULT_PASSWORD),
         updated_at: new Date().toISOString(),
       });
+
+      if (insertError) {
+        console.log('[adminAuth] init: insert failed:', insertError.message);
+      }
     }
   } catch (e) {
-    console.log('Init admin settings error:', e);
+    console.log('[adminAuth] init exception:', e);
   }
 };
 
@@ -44,25 +50,38 @@ export const validateAdminPassword = async (password: string): Promise<boolean> 
   try {
     const { data, error } = await supabase
       .from('admin_settings')
-      .select('password_hash')
+      .select('password_hash, updated_at')
       .order('updated_at', { ascending: false })
-      .limit(1);
+      .limit(1)
+      .maybeSingle();
 
     if (error) {
-      console.log('Validate error:', error.message);
+      console.log('[adminAuth] validate: query error:', error.message);
       // Fallback to default password if table doesn't exist
       return password === DEFAULT_PASSWORD;
     }
 
     // No rows - use default
-    if (!data || data.length === 0) {
+    if (!data) {
+      console.log('[adminAuth] validate: no rows found; using default fallback');
       return password === DEFAULT_PASSWORD;
     }
 
-    const row = data[0];
-    return row.password_hash === hashPassword(password);
+    const expectedHash = data.password_hash;
+    const providedHash = hashPassword(password);
+    const ok = expectedHash === providedHash;
+
+    console.log('[adminAuth] validate:', {
+      ok,
+      updated_at: data.updated_at,
+      expectedHashPrefix: expectedHash?.slice(0, 12),
+      providedHashPrefix: providedHash.slice(0, 12),
+      passwordLength: password.length,
+    });
+
+    return ok;
   } catch (e) {
-    console.log('Validate exception:', e);
+    console.log('[adminAuth] validate exception:', e);
     return password === DEFAULT_PASSWORD;
   }
 };
@@ -84,22 +103,20 @@ export const changeAdminPassword = async (
   }
 
   try {
-    // Delete all existing rows and insert new one (ensures single row)
-    await supabase.from('admin_settings').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    
+    // Insert a new row; validate always reads the latest by updated_at.
     const { error } = await supabase.from('admin_settings').insert({
       password_hash: hashPassword(newPassword),
       updated_at: new Date().toISOString(),
     });
 
     if (error) {
-      console.log('Change password error:', error.message);
+      console.log('[adminAuth] change: insert failed:', error.message);
       return { success: false, error: 'Failed to update password' };
     }
 
     return { success: true };
   } catch (e) {
-    console.log('Change password exception:', e);
+    console.log('[adminAuth] change exception:', e);
     return { success: false, error: 'Failed to update password' };
   }
 };
@@ -107,8 +124,6 @@ export const changeAdminPassword = async (
 // Reset to default password
 export const resetAdminPassword = async (): Promise<boolean> => {
   try {
-    await supabase.from('admin_settings').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    
     const { error } = await supabase.from('admin_settings').insert({
       password_hash: hashPassword(DEFAULT_PASSWORD),
       updated_at: new Date().toISOString(),
