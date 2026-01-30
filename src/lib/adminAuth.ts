@@ -1,9 +1,8 @@
-// Admin authentication with Firebase (syncs across devices)
+// Admin authentication with Firebase Realtime Database (syncs across devices)
 import { db } from '@/lib/firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { ref, get, set } from 'firebase/database';
 
 const DEFAULT_PASSWORD = 'Cfms@7890';
-const ADMIN_DOC_ID = 'admin_password';
 
 // Simple hash function
 const hashPassword = (password: string): string => {
@@ -16,14 +15,14 @@ const hashPassword = (password: string): string => {
   return 'hash_' + Math.abs(hash).toString(16) + '_' + password.length;
 };
 
-// Initialize admin settings (creates doc if not exists)
+// Initialize admin settings (creates record if not exists)
 export const initializeAdminSettings = async (): Promise<void> => {
   try {
-    const docRef = doc(db, 'admin_settings', ADMIN_DOC_ID);
-    const docSnap = await getDoc(docRef);
+    const adminRef = ref(db, 'admin_settings/password');
+    const snapshot = await get(adminRef);
 
-    if (!docSnap.exists()) {
-      await setDoc(docRef, {
+    if (!snapshot.exists()) {
+      await set(adminRef, {
         password_hash: hashPassword(DEFAULT_PASSWORD),
         updated_at: new Date().toISOString(),
       });
@@ -37,15 +36,15 @@ export const initializeAdminSettings = async (): Promise<void> => {
 // Validate admin password
 export const validateAdminPassword = async (password: string): Promise<boolean> => {
   try {
-    const docRef = doc(db, 'admin_settings', ADMIN_DOC_ID);
-    const docSnap = await getDoc(docRef);
+    const adminRef = ref(db, 'admin_settings/password');
+    const snapshot = await get(adminRef);
 
-    if (!docSnap.exists()) {
-      console.log('[adminAuth] validate: no doc found; using default fallback');
+    if (!snapshot.exists()) {
+      console.log('[adminAuth] validate: no data found; using default fallback');
       return password === DEFAULT_PASSWORD;
     }
 
-    const data = docSnap.data();
+    const data = snapshot.val();
     const expectedHash = data.password_hash;
     const providedHash = hashPassword(password);
     const ok = expectedHash === providedHash;
@@ -81,8 +80,8 @@ export const changeAdminPassword = async (
   }
 
   try {
-    const docRef = doc(db, 'admin_settings', ADMIN_DOC_ID);
-    await setDoc(docRef, {
+    const adminRef = ref(db, 'admin_settings/password');
+    await set(adminRef, {
       password_hash: hashPassword(newPassword),
       updated_at: new Date().toISOString(),
     });
@@ -98,8 +97,8 @@ export const changeAdminPassword = async (
 // Reset to default password
 export const resetAdminPassword = async (): Promise<boolean> => {
   try {
-    const docRef = doc(db, 'admin_settings', ADMIN_DOC_ID);
-    await setDoc(docRef, {
+    const adminRef = ref(db, 'admin_settings/password');
+    await set(adminRef, {
       password_hash: hashPassword(DEFAULT_PASSWORD),
       updated_at: new Date().toISOString(),
     });
