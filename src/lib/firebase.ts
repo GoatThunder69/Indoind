@@ -1,9 +1,10 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { getDatabase } from "firebase/database";
 
 const firebaseConfig = {
   apiKey: "AIzaSyArGvUOJ041eNNW6PDvLEDLZhSh4LE4HUk",
   authDomain: "cmfs-de001.firebaseapp.com",
+  databaseURL: "https://cmfs-de001-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "cmfs-de001",
   storageBucket: "cmfs-de001.firebasestorage.app",
   messagingSenderId: "903302114644",
@@ -12,4 +13,4 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+export const db = getDatabase(app);
