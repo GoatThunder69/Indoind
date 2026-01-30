@@ -1,7 +1,9 @@
-// Admin authentication with Supabase (syncs across devices)
-import { supabase } from '@/integrations/supabase/client';
+// Admin authentication with Firebase (syncs across devices)
+import { db } from '@/lib/firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 const DEFAULT_PASSWORD = 'Cfms@7890';
+const ADMIN_DOC_ID = 'admin_password';
 
 // Simple hash function
 const hashPassword = (password: string): string => {
@@ -14,31 +16,18 @@ const hashPassword = (password: string): string => {
   return 'hash_' + Math.abs(hash).toString(16) + '_' + password.length;
 };
 
-// Initialize admin settings (creates row if not exists)
+// Initialize admin settings (creates doc if not exists)
 export const initializeAdminSettings = async (): Promise<void> => {
   try {
-    const { data, error } = await supabase
-      .from('admin_settings')
-      .select('password_hash, updated_at')
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const docRef = doc(db, 'admin_settings', ADMIN_DOC_ID);
+    const docSnap = await getDoc(docRef);
 
-    if (error) {
-      console.log('[adminAuth] init: table check failed:', error.message);
-      return;
-    }
-
-    // If no rows exist, create default
-    if (!data) {
-      const { error: insertError } = await supabase.from('admin_settings').insert({
+    if (!docSnap.exists()) {
+      await setDoc(docRef, {
         password_hash: hashPassword(DEFAULT_PASSWORD),
         updated_at: new Date().toISOString(),
       });
-
-      if (insertError) {
-        console.log('[adminAuth] init: insert failed:', insertError.message);
-      }
+      console.log('[adminAuth] init: created default password');
     }
   } catch (e) {
     console.log('[adminAuth] init exception:', e);
@@ -48,25 +37,15 @@ export const initializeAdminSettings = async (): Promise<void> => {
 // Validate admin password
 export const validateAdminPassword = async (password: string): Promise<boolean> => {
   try {
-    const { data, error } = await supabase
-      .from('admin_settings')
-      .select('password_hash, updated_at')
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const docRef = doc(db, 'admin_settings', ADMIN_DOC_ID);
+    const docSnap = await getDoc(docRef);
 
-    if (error) {
-      console.log('[adminAuth] validate: query error:', error.message);
-      // Fallback to default password if table doesn't exist
+    if (!docSnap.exists()) {
+      console.log('[adminAuth] validate: no doc found; using default fallback');
       return password === DEFAULT_PASSWORD;
     }
 
-    // No rows - use default
-    if (!data) {
-      console.log('[adminAuth] validate: no rows found; using default fallback');
-      return password === DEFAULT_PASSWORD;
-    }
-
+    const data = docSnap.data();
     const expectedHash = data.password_hash;
     const providedHash = hashPassword(password);
     const ok = expectedHash === providedHash;
@@ -76,7 +55,6 @@ export const validateAdminPassword = async (password: string): Promise<boolean> 
       updated_at: data.updated_at,
       expectedHashPrefix: expectedHash?.slice(0, 12),
       providedHashPrefix: providedHash.slice(0, 12),
-      passwordLength: password.length,
     });
 
     return ok;
@@ -103,17 +81,13 @@ export const changeAdminPassword = async (
   }
 
   try {
-    // Insert a new row; validate always reads the latest by updated_at.
-    const { error } = await supabase.from('admin_settings').insert({
+    const docRef = doc(db, 'admin_settings', ADMIN_DOC_ID);
+    await setDoc(docRef, {
       password_hash: hashPassword(newPassword),
       updated_at: new Date().toISOString(),
     });
 
-    if (error) {
-      console.log('[adminAuth] change: insert failed:', error.message);
-      return { success: false, error: 'Failed to update password' };
-    }
-
+    console.log('[adminAuth] password changed successfully');
     return { success: true };
   } catch (e) {
     console.log('[adminAuth] change exception:', e);
@@ -124,13 +98,14 @@ export const changeAdminPassword = async (
 // Reset to default password
 export const resetAdminPassword = async (): Promise<boolean> => {
   try {
-    const { error } = await supabase.from('admin_settings').insert({
+    const docRef = doc(db, 'admin_settings', ADMIN_DOC_ID);
+    await setDoc(docRef, {
       password_hash: hashPassword(DEFAULT_PASSWORD),
       updated_at: new Date().toISOString(),
     });
-
-    return !error;
+    return true;
   } catch (e) {
+    console.log('[adminAuth] reset exception:', e);
     return false;
   }
 };
