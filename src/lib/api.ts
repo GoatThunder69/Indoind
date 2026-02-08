@@ -100,6 +100,14 @@ export const API_ENDPOINTS: ApiEndpoint[] = [
     placeholder: 'Enter PAN number',
     description: 'Get PAN card details',
   },
+  {
+    id: 'email',
+    name: 'Email Lookup',
+    endpoint: '/email',
+    parameter: 'address',
+    placeholder: 'Enter email address',
+    description: 'Get details by email address',
+  },
 ];
 
 export interface ApiResponse {
